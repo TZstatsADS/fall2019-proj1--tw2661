@@ -1,0 +1,209 @@
+---
+title: "My Project"
+author: "Pretty Girls"
+output:
+  html_document:
+    df_print: paged
+---
+
+### Load all the required libraries
+
+```{r load libraries, warning=FALSE, message=FALSE}
+library(topicmodels)
+library(tidyverse)
+library(tidytext)
+library(plotly)
+library(tm)
+library(data.table)
+library(wordcloud2)
+library(ggplot2)
+library(plotly)
+library(hrbrthemes)
+library(knitr)
+library(htmlwidgets)
+```
+
+### Load the dataset including processed lyrics data
+```{r load data, warning=FALSE, message=FALSE}
+# load processed lyrics data
+load('processed_lyrics.RData') 
+```
+
+### Date view and Preparations for visualization 
+We firstly analysis the genre and year in the dataset. The results are as follows
+```{r, warning=FALSE, message=FALSE}
+# the function to Preparations for wordcloud
+predata <- function(x){
+temp <- VCorpus(VectorSource(x$stemmedwords))
+temp_tibble <- tidy(temp) %>%
+  select(text) %>%
+  mutate(id = row_number()) %>%
+  unnest_tokens(word, text)
+temp_frenq <- data.frame(table(temp_tibble$word))
+temp_frenq <- temp_frenq[order(temp_frenq$Freq,decreasing = TRUE),]
+temp_frenq
+}
+
+
+genre <- data.frame(table(dt_lyrics$genre))
+genre <- genre[order(genre$Freq,decreasing = TRUE),]
+names(genre) <- c('Genre','Freq')
+p <- ggplot(genre,aes(x=reorder(Genre,Freq),y=Freq))+geom_bar(stat = "identity",fill = 'skyblue')+xlab("Genre")+coord_flip()+theme(panel.background=element_rect(fill='transparent',color ="gray")) 
+p <- ggplotly(p)
+p
+```
+We can see that the genres include Rock, Pop, Metal, Hip-hop, Country, Jazz, Electronic, R&B, Indie and Folk.And the top three is Rock, Pop and Metal.
+
+```{r, warning=FALSE, message=FALSE}
+year <- data.frame(table(dt_lyrics$year))
+year <- year[-c(1,2,3),]
+year$Var1 <- as.numeric(as.character(year$Var1))
+names(year) <- c('Year','numbers')
+p <- year %>%
+  ggplot( aes(x=Year, y=numbers)) +
+    geom_area(fill="#69b3a2", alpha=0.5) +
+    geom_line(color="#69b3a2") +
+    ylab("The numbers of the song") + ggtitle("The number of songs as the time by")+
+    theme_ipsum()
+p <- ggplotly(p)
+p
+```
+
+We can see that the number of songs have increased greatly after 2000. The number of songs reached its peak in 2006. Thus we make the plot to describe the number of the different genres in 2006.
+```{r}
+data2006 <- subset(dt_lyrics,dt_lyrics$year==2006)
+plot2006 <- data2006%>%group_by(genre)%>%summarise(n =n())
+ggplot(plot2006,aes(x=reorder(genre,n),n,fill=genre))+geom_bar(stat = "identity")+coord_flip()+
+  theme(legend.position = "none")
+```
+
+We can see that the Rock, Pop, Metal still have the number of top three in 2006. Thus we mainly analysis the three geners of songs in 2006 in the next part.
+
+### Wordcloud and Word frequency
+We calculate the number of different words in the lyrics by the geners. And we make the wordcloud for the top 150 high frequency words.
+```{r}
+dt_lyrics <-subset(dt_lyrics,dt_lyrics$year==2006)
+Rock_data <- filter(dt_lyrics,genre=="Rock")
+Pop_data <- filter(dt_lyrics,genre=="Pop")
+Metal_data <- filter(dt_lyrics,genre=="Metal")
+
+Rock_frenq <- predata(Rock_data)
+plot_frenq <- Rock_frenq[1:150,]
+f1 <- wordcloud2(plot_frenq, size =1,shape = 'pentagon')
+f1 
+```
+
+```{r}
+Pop_frenq <- predata(Pop_data)
+plot_frenq <- Pop_frenq[1:150,]
+f2 <- wordcloud2(plot_frenq, size =1)
+f2
+```
+
+```{r}
+Metal_frenq <- predata(Metal_data)[1:150,]
+plot_frenq <- Metal_frenq[1:150,]
+f3 <-wordcloud2(plot_frenq, size =1,shape = 'pentagon')
+f3
+```
+
+We make the chart of the top 15 High frequency Words among the Rock, Pop and Metal songs. The result is as follows.
+```{r echo=F,results='asis',error=F,warning=F}
+Word_compare <- data.frame(Rock=Rock_frenq$Var1[1:15],
+                           Pop=Pop_frenq$Var1[1:15],
+                           Metal=Metal_frenq$Var1[1:15])
+rownames(Word_compare)<-c(1:15)
+kable(Word_compare, format = "markdown")
+```
+
+We can see that there are some same top 15 high frequency words among the Rock, Pop and Metal songs like love, time life and so on. And there are some differences in the using of high frequency words. The metal songs always include die and soul which did not appear in top 15 high frequency words of Rock and Pop songs. In the next part, we would do the text sentiment analysis for the high frequency words of the different gener songs.
+
+### Sentiment Analysis
+We download the English positive and negative opinion words or sentiment words from the link(https://www.cs.uic.edu/~liub/FBS/sentiment-analysis.html#lexicon).Then we compute the pecertage of the positive and negative words in the different gener songs.
+```{r}
+negative <- readLines("opinion-lexicon-English/negative-words.txt")
+positive <- readLines("opinion-lexicon-English/positive-words.txt")
+
+Rock_frenq$Var1 <-tolower(Rock_frenq$Var1)
+Pop_frenq$Var1 <-tolower(Pop_frenq$Var1)
+Metal_frenq$Var1 <-tolower(Metal_frenq$Var1)
+
+count_sentiment <- function(dataset){
+  dataset$positive <- as.numeric(lapply(dataset$Var1,function(x,positives=positive){
+  !is.na(match(x, positives))
+  }))
+  dataset$negative <- as.numeric(lapply(dataset$Var1,function(x,negatives=negative){
+  !is.na(match(x, negatives))
+  }))
+  dataset
+}
+
+Rockdata <- count_sentiment(Rock_frenq)
+Popdata <- count_sentiment(Pop_frenq)
+Metaldata <- count_sentiment(Metal_frenq)
+
+sentiment_data <- data.frame(type = c('Rock','Pop','Metal'),
+                             positive =c(sum(Rockdata$positive*Rockdata$Freq),
+                                         sum(Popdata$positive*Popdata$Freq),
+                                         sum(Metaldata$positive*Metaldata$Freq)),
+                             negative =c(sum(Rockdata$negative*Rockdata$Freq),
+                                         sum(Popdata$negative*Popdata$Freq),
+                                         sum(Metaldata$negative*Metaldata$Freq)))
+plot_sentiment <- sentiment_data%>%gather(sentiment,n,-type)
+ggplot(plot_sentiment,aes(type,n,fill=sentiment))+geom_bar(stat = "identity",position = "fill")
+```
+
+We can see that the Metal and Rock songs included more negative words than positive words. And the Metal songs have the largest pecentage of negative words in the three geners of songs. The emotion of the Pop songs are very neutral and not very negative or positive.
+
+### Topic modeling
+In the last part, we did the text sentiment analysis for the different geners songs. Further, in this part, we make use of the  topic modeling for finding clusters of words that characterize a set of lyrics.
+```{r, warning=FALSE, message=FALSE}
+corpus = Corpus(VectorSource(Metal_data$stemmedwords))
+corpus = tm_map(corpus,removePunctuation)
+corpus = tm_map(corpus,stripWhitespace)
+corpus = tm_map(corpus,tolower)
+corpus = tm_map(corpus,removeWords,stopwords("english"))
+tdm = DocumentTermMatrix(corpus) # Creating a Term document Matrix
+
+ap_lda <- LDA(tdm, k = 2, control = list(seed = 1234))
+ap_topics <- tidy(ap_lda, matrix = "beta")
+
+ap_top_terms <- ap_topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+  ggplot(ap_top_terms,aes(reorder(term,beta),beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+```
+
+This visualization informed us understand the two topics that were extracted from the lyrics of metal songs. The most common words in topic 1 include “life”, “time”, “die”, "live",and “kill”, which suggests it may represent the thinking about life. Those most common in topic 2 include “dark”, “light”, "life", "death" and “dream”, suggesting that this topic represents the thought about survival dreams and hopes. We can see that the metal songs have genearally been about emotional and social battles.
+
+```{r, warning=FALSE, message=FALSE}
+corpus = Corpus(VectorSource(Pop_data$stemmedwords))
+corpus = tm_map(corpus,removePunctuation)
+corpus = tm_map(corpus,stripWhitespace)
+corpus = tm_map(corpus,tolower)
+corpus = tm_map(corpus,removeWords,stopwords("english"))
+tdm = DocumentTermMatrix(corpus) # Creating a Term document Matrix
+
+ap_lda <- LDA(tdm, k = 2, control = list(seed = 1234))
+ap_topics <- tidy(ap_lda, matrix = "beta")
+
+ap_top_terms <- ap_topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+  ggplot(ap_top_terms,aes(reorder(term,beta),beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+```
+
+This visualization informed us understand the two topics that were extracted from the lyrics of Pop songs. The most common words in topic 1 include “girl”, “boy”, “dance”, and “chorus”, which suggests it may represent young and energetic. Those most common in topic 2 include “love”, “baby”, "heart", and “time”, suggesting that this topic represents the romantic love. We can see that the themes of Pop songs are usually heartbreak as well as partying.
+
